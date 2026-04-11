@@ -172,9 +172,9 @@ CONTEXTE DU DOSSIER:
 - Montant DDG: ${ddg['Montant DG restant dans IGLOO'] ?? 'Non trouvé'} €
 - Statut DDG: ${ddg['DDG'] || 'N/A'}
 
-PROCESS:\n1. Compare l\'EDL IN et l\'EDL OUT pièce par pièce (texte ET photos)\n2. Identifie les dégradations nouvelles vs usure normale\n3. Détermine qui paie le ménage (locataire si plus sale qu\'à l\'entrée, propriétaire sinon)\n4. Calcule le délai de remboursement DDG (1 mois si bon état, 2 mois si dégradations)\n5. Estime le coût des réparations (fourchette €, tarifs marché parisien)\n\nFORMULES MÉNAGE DISPONIBLES (2 formules, PAS d\'intégral):\n- Formule Professionnelle : nettoyage standard complet\n- Formule Complète : nettoyage approfondi (vitres, détartrage, linge)\n\nRÉPONDS UNIQUEMENT EN JSON avec cette structure exacte:\n{\n  \"nom_locataire_extrait\": \"Nom Prénom tel qu'il apparaît dans les rapports EDL\",\n  \"ref_appartement\": \"Numéro d'appartement UNIQUEMENT (ex: 5273) sans le n° de location\",,\\n  \"num_location_extrait\": \"Numéro de location/dossier extrait des rapports (ex: 151284)\"\n  \"type_rapport_in\": \"Entrée ou Sortie selon le premier PDF fourni\",\n  \"type_rapport_out\": \"Entrée ou Sortie selon le second PDF fourni\",\n  \"pret_relocation\": true,\n  \"menage_necessaire\": true,\n  \"menage_imputable\": \"locataire\",\n  \"menage_formule_recommandee\": \"professionnelle\",\n  \"urgence\": false,\n  \"delai_ddg_mois\": 1,\n  \"deductions_locataire\": [{\"description\": \"...\", \"estimation_euros\": \"XX-XX €\"}],\n  \"charge_proprietaire\": [{\"description\": \"...\", \"raison\": \"...\"}],\n  \"reparations\": [{\"description\": \"...\", \"urgence\": true, \"estimation_euros\": \"XX-XX €\", \"imputable\": \"locataire\"}],\n  \"points_bloquants\": [],\n  \"observations\": [],\n  \"resume\": \"Résumé en 2-3 phrases\",\n  \"action\": \"menage_ddg\",\n  \"etat_entree_propre\": true,\n  \"total_deductions_min\": 0,\n  \"total_deductions_max\": 0\n}`;
+PROCESS:\n1. Compare l\'EDL IN et l\'EDL OUT pièce par pièce (texte ET photos)\n2. Identifie les dégradations nouvelles vs usure normale\n3. Détermine qui paie le ménage (locataire si plus sale qu\'à l\'entrée, propriétaire sinon)\n4. Calcule le délai de remboursement DDG (1 mois si bon état, 2 mois si dégradations)\n5. Estime le coût des réparations (fourchette €, tarifs marché parisien)\n\nFORMULES MÉNAGE DISPONIBLES (2 formules, PAS d\'intégral):\n- Formule Professionnelle : nettoyage standard complet\n- Formule Complète : nettoyage approfondi (vitres, détartrage, linge)\n\nRÈGLES IMPORTANTES:\n- MURS : Les salissures et taches sur les murs NE sont PAS des éléments de ménage. Ne les inclus JAMAIS dans menage_necessaire ni dans deductions_locataire au titre du ménage. Mentionne-les uniquement dans le champ \"observations\" (ex: \"Salissures sur les murs du salon — à signaler au propriétaire, hors périmètre ménage\").\n- PHOTOS DUPLIQUÉES : Examine attentivement les photos des deux rapports. Si tu constates que des photos de l\'EDL OUT sont identiques ou quasi-identiques à des photos de l\'EDL IN (même cadrage, même angle, mêmes objets, même lumière), cela indique que le welcomer a réutilisé les mêmes photos. Dans ce cas : mets alerte_photos_dupliquees à true et décris précisément les pages/pièces concernées dans alerte_photos_detail.\n\nRÉPONDS UNIQUEMENT EN JSON avec cette structure exacte:\n{\n  \"nom_locataire_extrait\": \"Nom Prénom tel qu'il apparaît dans les rapports EDL\",\n  \"ref_appartement\": \"Numéro d'appartement UNIQUEMENT (ex: 5273) sans le n° de location\",\n  \"num_location_extrait\": \"Numéro de location/dossier extrait des rapports (ex: 151284)\",\n  \"type_rapport_in\": \"Entrée ou Sortie selon le premier PDF fourni\",\n  \"type_rapport_out\": \"Entrée ou Sortie selon le second PDF fourni\",\n  \"pret_relocation\": true,\n  \"menage_necessaire\": true,\n  \"menage_imputable\": \"locataire\",\n  \"menage_formule_recommandee\": \"professionnelle\",\n  \"urgence\": false,\n  \"delai_ddg_mois\": 1,\n  \"deductions_locataire\": [{\"description\": \"...\", \"estimation_euros\": \"XX-XX €\"}],\n  \"charge_proprietaire\": [{\"description\": \"...\", \"raison\": \"...\"}],\n  \"reparations\": [{\"description\": \"...\", \"urgence\": true, \"estimation_euros\": \"XX-XX €\", \"imputable\": \"locataire\"}],\n  \"points_bloquants\": [],\n  \"observations\": [],\n  \"resume\": \"Résumé en 2-3 phrases\",\n  \"action\": \"menage_ddg\",\n  \"etat_entree_propre\": true,\n  \"total_deductions_min\": 0,\n  \"total_deductions_max\": 0,\n  \"alerte_photos_dupliquees\": false,\n  \"alerte_photos_detail\": \"\"\n}`;
 
-      const response = await fetch("/.netlify/functions/analyze", {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -307,7 +307,7 @@ RÉPONDS UNIQUEMENT EN JSON:
   "resume": "Résumé 2-3 phrases",
   "recommandation": "..."
 }`;
-      const response = await fetch("/.netlify/functions/analyze", {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -378,16 +378,15 @@ RÉPONDS UNIQUEMENT EN JSON:
         .btn-primary:disabled { background: #8FB89A; cursor: not-allowed; }
         .btn-outline { background: #ffffff !important; color: #1E4D2B !important; border: 1.5px solid #1E4D2B !important; padding: 10px 22px; border-radius: 8px; font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; transition: all .2s; }
         .btn-outline:hover { background: #1E4D2B; color: white; }
-        .upload-zone { border: 2px dashed #CCC4B0 !important; border-radius: 10px; padding: 16px; text-align: center; cursor: pointer; transition: border-color .2s; background: #fafafa !important; color: #1A1A1A !important; }
+        .upload-zone { border: 2px dashed #CCC4B0 !important; border-radius: 10px; padding: 20px; text-align: center; cursor: pointer; transition: border-color .2s; background: #fafafa !important; color: #1A1A1A !important; }
         .upload-zone:hover { border-color: #1E4D2B; }
         .upload-zone.filled { border-color: #2e7d32; background: #f1f8f1; }
-        .upload-filename { font-size: 13px; color: #1E4D2B; font-weight: 500; word-break: break-all; overflow-wrap: break-word; text-align: left; margin-top: 2px; }
         input[type=text] { width: 100% !important; padding: 12px 16px !important; border: 1.5px solid #DDD5C4 !important; border-radius: 8px !important; font-family: inherit !important; font-size: 15px !important; outline: none !important; transition: border-color .2s; background: #ffffff !important; color: #1A1A1A !important; -webkit-text-fill-color: #1A1A1A !important; }
         input[type=text]:focus { border-color: #1E4D2B; }
         .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .info-item { background: #F5F0E8 !important; border-radius: 8px; padding: 12px 16px; color: #1A1A1A !important; }
         .info-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #888888 !important; font-weight: 600; margin-bottom: 4px; }
-        .info-value { font-size: 14px; color: #1E4D2B !important; font-weight: 500; word-break: break-word; overflow-wrap: break-word; }
+        .info-value { font-size: 14px; color: #1E4D2B !important; font-weight: 500; }
         .section-title { font-family: \'DM Serif Display\', serif; font-size: 18px; color: #1E4D2B; margin-bottom: 16px; border-bottom: 1px solid #E8B84B; padding-bottom: 8px; }
         .result-section { margin-bottom: 20px; }
         .result-list { list-style: none; }
@@ -440,7 +439,7 @@ RÉPONDS UNIQUEMENT EN JSON:
                   )}
                   <div className="info-grid">
                     <div className="info-item"><div className="info-label">Locataire</div>
-                      <div className="info-value">{info.loc.ContactPayeur && info.loc.ContactPayeur !== "—" ? info.loc.ContactPayeur : <span style={{color:"#aaa",fontStyle:"italic"}}>Non renseigné</span>}</div>
+                      {info.manual ? <input type="text" style={{marginTop:"4px",padding:"4px 8px",fontSize:"13px",border:"1px solid #ddd",borderRadius:"4px",width:"100%"}} placeholder="Nom locataire" onChange={e=>{const v=e.target.value;setInfo(p=>({...p,loc:{...p.loc,ContactPayeur:v}}))}} /> : <div className="info-value">{info.loc.ContactPayeur}</div>}
                     </div>
                     <div className="info-item"><div className="info-label">Appartement</div>
                       {info.manual ? <input type="text" style={{marginTop:"4px",padding:"4px 8px",fontSize:"13px",border:"1px solid #ddd",borderRadius:"4px",width:"100%"}} placeholder="Réf appart" onChange={e=>{const v=e.target.value;setInfo(p=>({...p,loc:{...p.loc,Référence:v}}))}} /> : <div className="info-value">{info.loc.Référence}</div>}
@@ -479,14 +478,14 @@ RÉPONDS UNIQUEMENT EN JSON:
                       <div style={{ fontSize: "12px", color: "#666", marginBottom: "6px", fontWeight: "600", textTransform: "uppercase", letterSpacing: ".05em" }}>EDL Entrée (PDF)</div>
                       <label className={"upload-zone" + (edlIn?" filled":"")}>
                         <input type="file" accept=".pdf" style={{ display: "none" }} onChange={e => setEdlIn(e.target.files[0])} />
-                        {edlIn ? <div style={{display:"flex",alignItems:"flex-start",gap:"8px"}}><span style={{fontSize:"16px",flexShrink:0}}>✅</span><div><div className="upload-filename">{edlIn.name}</div><div style={{fontSize:"11px",color:"#2e7d32",marginTop:"2px"}}>{(edlIn.size/1024/1024).toFixed(1)} MB</div></div></div> : <div style={{ color: "#999" }}>Cliquer pour uploader</div>}
+                        {edlIn ? <div>✅ {edlIn.name} <span style={{fontSize:"11px",color:"#2e7d32"}}>({(edlIn.size/1024/1024).toFixed(1)} MB)</span></div> : <div style={{ color: "#999" }}>Cliquer pour uploader</div>}
                       </label>
                     </div>
                     <div>
                       <div style={{ fontSize: "12px", color: "#666", marginBottom: "6px", fontWeight: "600", textTransform: "uppercase", letterSpacing: ".05em" }}>EDL Sortie (PDF)</div>
                       <label className={"upload-zone" + (edlOut?" filled":"")}>
                         <input type="file" accept=".pdf" style={{ display: "none" }} onChange={e => setEdlOut(e.target.files[0])} />
-                        {edlOut ? <div style={{display:"flex",alignItems:"flex-start",gap:"8px"}}><span style={{fontSize:"16px",flexShrink:0}}>✅</span><div><div className="upload-filename">{edlOut.name}</div><div style={{fontSize:"11px",color:"#2e7d32",marginTop:"2px"}}>{(edlOut.size/1024/1024).toFixed(1)} MB</div></div></div> : <div style={{ color: "#999" }}>Cliquer pour uploader</div>}
+                        {edlOut ? <div>✅ {edlOut.name} <span style={{fontSize:"11px",color:"#2e7d32"}}>({(edlOut.size/1024/1024).toFixed(1)} MB)</span></div> : <div style={{ color: "#999" }}>Cliquer pour uploader</div>}
                       </label>
                     </div>
                     <button className="btn-primary" disabled={!edlIn || !edlOut || loading} onClick={analyze}>
@@ -497,7 +496,7 @@ RÉPONDS UNIQUEMENT EN JSON:
                       <div style={{ fontSize: "12px", color: "#666", marginBottom: "6px", fontWeight: "600", textTransform: "uppercase", letterSpacing: ".05em" }}>EDL Sortie location précédente (PDF)</div>
                       <label className={"upload-zone" + (edlPrevOut?" filled":"")}>
                         <input type="file" accept=".pdf" style={{ display: "none" }} onChange={e => setEdlPrevOut(e.target.files[0])} />
-                        {edlPrevOut ? <div style={{display:"flex",alignItems:"flex-start",gap:"8px"}}><span style={{fontSize:"16px",flexShrink:0}}>✅</span><div><div className="upload-filename">{edlPrevOut.name}</div><div style={{fontSize:"11px",color:"#2e7d32",marginTop:"2px"}}>{(edlPrevOut.size/1024/1024).toFixed(1)} MB</div></div></div> : <div style={{ color: "#bbb", fontSize: "12px" }}>Cliquer pour uploader</div>}
+                        {edlPrevOut ? <div>✅ {edlPrevOut.name} <span style={{fontSize:"11px",color:"#2e7d32"}}>({(edlPrevOut.size/1024/1024).toFixed(1)} MB)</span></div> : <div style={{ color: "#bbb", fontSize: "12px" }}>Cliquer pour uploader</div>}
                       </label>
                       {edlPrevOut && (
                         <button className="btn-outline" style={{ width: "100%", marginTop: "8px" }} disabled={!edlIn || loadingCompare} onClick={analyzeCompare}>
@@ -620,6 +619,21 @@ RÉPONDS UNIQUEMENT EN JSON:
                     <div style={{ fontSize: "14px", color: "#444", background: "#F5F0E8", padding: "14px 16px", borderRadius: "8px", lineHeight: "1.6", marginBottom: "20px" }}>
                       {result.resume}
                     </div>
+
+                    {result.alerte_photos_dupliquees && (
+                      <div style={{ background: "#FFF3CD", border: "2px solid #FFC107", borderRadius: "8px", padding: "14px 16px", marginBottom: "16px", display: "flex", gap: "10px", alignItems: "flex-start" }}>
+                        <span style={{ fontSize: "20px", flexShrink: 0 }}>⚠️</span>
+                        <div>
+                          <div style={{ fontWeight: "700", color: "#856404", fontSize: "13px", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "4px" }}>Photos potentiellement dupliquées — Vérification nécessaire</div>
+                          <div style={{ fontSize: "13px", color: "#856404", lineHeight: "1.5" }}>
+                            Des photos semblent identiques entre l&apos;EDL IN et l&apos;EDL OUT. Le welcomer a peut-être réutilisé les mêmes photos. Merci de vérifier les rapports originaux.
+                          </div>
+                          {result.alerte_photos_detail && (
+                            <div style={{ marginTop: "6px", fontSize: "12px", color: "#856404", fontStyle: "italic" }}>{result.alerte_photos_detail}</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {result.deductions_locataire?.length > 0 && (
                       <div className="result-section">
