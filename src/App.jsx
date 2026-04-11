@@ -308,6 +308,24 @@ RÉPONDS UNIQUEMENT EN JSON:
   "recommandation": "..."
 }`;
       const response = await fetch("/.netlify/functions/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4096,
+          system: systemPrompt,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "text", text: `EDL SORTIE LOCATION PRÉCÉDENTE (${pagesPrevOut.length} pages) :` },
+              ...pagesPrevOut.map(b64 => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } })),
+              { type: "text", text: `EDL ENTRÉE LOCATION ACTUELLE (${pagesIn.length} pages) :` },
+              ...pagesIn.map(b64 => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } })),
+              { type: "text", text: "Compare ces deux rapports et réponds uniquement en JSON valide sans backticks." }
+            ]
+          }]
+        })
+      });
       const data = await response.json();
       if (data.error) throw new Error("API: " + data.error.message);
       const text = data.content?.find(c => c.type === "text")?.text || "";
