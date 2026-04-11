@@ -34,21 +34,29 @@ async function extractPdfPages(file) {
         const pdfjsLib = window.pdfjsLib;
         pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
         const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(e.target.result) }).promise;
-        const pages = [];
-        const maxPages = Math.min(pdf.numPages, 40);
-        for (let i = 1; i <= maxPages; i++) {
+        let fullText = "";
+        const pageHashes = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
-          // Render page as compressed JPEG image
-          const viewport = page.getViewport({ scale: 0.9 });
-          const canvas = document.createElement("canvas");
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const ctx = canvas.getContext("2d");
-          await page.render({ canvasContext: ctx, viewport }).promise;
-          const b64 = canvas.toDataURL("image/jpeg", 0.55).split(",")[1];
-          pages.push(b64);
+          // Extraction texte brut (100% fiable, rien ne peut être survolé)
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map(item => item.str).join(" ").trim();
+          if (pageText) fullText += `\n=== PAGE ${i} ===\n${pageText}`;
+          // Miniature basse résolution pour détection de doublons par hash
+          const vp = page.getViewport({ scale: 0.1 });
+          const cv = document.createElement("canvas");
+          cv.width = Math.max(1, Math.floor(vp.width));
+          cv.height = Math.max(1, Math.floor(vp.height));
+          const cx = cv.getContext("2d");
+          await page.render({ canvasContext: cx, viewport: vp }).promise;
+          const px = cx.getImageData(0, 0, cv.width, cv.height).data;
+          let hash = 0;
+          for (let j = 0; j < px.length; j += 4) {
+            hash = ((hash << 5) - hash + px[j] + px[j+1] + px[j+2]) & 0xffffffff;
+          }
+          pageHashes.push({ page: i, hash: hash >>> 0 });
         }
-        resolve(pages);
+        resolve({ text: fullText, pageHashes });
       } catch(err) { reject(err); }
     };
     reader.onerror = reject;
@@ -148,49 +156,48 @@ export default function App() {
     if (!edlIn || !edlOut || !info) return;
     setLoading(true);
     try {
-      const [pagesIn, pagesOut] = await Promise.all([
+      const [dataIn, dataOut] = await Promise.all([
         extractPdfPages(edlIn),
         extractPdfPages(edlOut)
       ]);
-      if (!pagesIn.length) throw new Error("Impossible de lire l\'EDL Entrée.");
-      if (!pagesOut.length) throw new Error("Impossible de lire l\'EDL Sortie.");
+      if (!dataIn.text) throw new Error("Impossible de lire l\'EDL Entrée.");
+      if (!dataOut.text) throw new Error("Impossible de lire l\'EDL Sortie.");
       const { loc, appart, ddg, nextBooking } = info;
       const daysToNext = nextBooking ? daysBetween(nextBooking.CheckIn) : null;
       const urgence = daysToNext !== null && daysToNext <= 7;
 
-      const systemPrompt = `Tu es un expert en gestion locative chez Paris Attitude. Tu analyses des rapports d'états des lieux (EDL) pour déterminer si un appartement est prêt à la relocation.
+      // Détection doublons photos par hash mathématique (100% fiable)
+      const duplicates = [];
+      for (const hOut of dataOut.pageHashes) {
+        if (hOut.hash < 1000) continue;
+        const match = dataIn.pageHashes.find(hIn => hIn.hash === hOut.hash);
+        if (match) duplicates.push({ pageIn: match.page, pageOut: hOut.page });
+      }
+      const hasDuplicatePhotos = duplicates.length > 0;
+      const duplicateDetail = hasDuplicatePhotos
+        ? `Pages EDL OUT ${[...new Set(duplicates.map(d => d.pageOut))].join(", ")} identiques aux pages EDL IN ${[...new Set(duplicates.map(d => d.pageIn))].join(", ")}`
+        : "";
 
-CONTEXTE DU DOSSIER:
-- N° Location: ${loc.RentalID}
-- Locataire: ${loc.ContactPayeur}
-- Appartement ref: ${loc.Référence}
-- Propriétaire: ${appart.Proprietaire || 'N/A'}
-- Gestionnaire: ${appart.Gestionnaire || 'N/A'}
-- Date de sortie (CheckOut): ${loc.CheckOut}
-- Prochain CheckIn: ${nextBooking ? nextBooking.CheckIn + ' (' + daysToNext + ' jours)' : 'Aucun à venir'}
-- URGENCE CI: ${urgence ? 'OUI - CI dans ' + daysToNext + ' jours' : 'NON'}
-- Montant DDG: ${ddg['Montant DG restant dans IGLOO'] ?? 'Non trouvé'} €
-- Statut DDG: ${ddg['DDG'] || 'N/A'}
-
-PROCESS:\n1. Compare l\'EDL IN et l\'EDL OUT pièce par pièce (texte ET photos)\n2. Identifie les dégradations nouvelles vs usure normale\n3. Détermine qui paie le ménage (locataire si plus sale qu\'à l\'entrée, propriétaire sinon)\n4. Calcule le délai de remboursement DDG (1 mois si bon état, 2 mois si dégradations)\n5. Estime le coût des réparations (fourchette €, tarifs marché parisien)\n\nFORMULES MÉNAGE DISPONIBLES (2 formules, PAS d\'intégral):\n- Formule Professionnelle : nettoyage standard complet\n- Formule Complète : nettoyage approfondi (vitres, détartrage, linge)\n\nRÈGLES IMPORTANTES:\n- MURS : Les salissures et taches sur les murs NE sont PAS des éléments de ménage. Ne les inclus JAMAIS dans menage_necessaire ni dans deductions_locataire au titre du ménage. Mentionne-les uniquement dans le champ \"observations\" (ex: \"Salissures sur les murs du salon — à signaler au propriétaire, hors périmètre ménage\").\n- PHOTOS DUPLIQUÉES : Examine attentivement les photos des deux rapports. Si tu constates que des photos de l\'EDL OUT sont identiques ou quasi-identiques à des photos de l\'EDL IN (même cadrage, même angle, mêmes objets, même lumière), cela indique que le welcomer a réutilisé les mêmes photos. Dans ce cas : mets alerte_photos_dupliquees à true et décris précisément les pages/pièces concernées dans alerte_photos_detail.\n\nRÉPONDS UNIQUEMENT EN JSON avec cette structure exacte:\n{\n  \"nom_locataire_extrait\": \"Nom Prénom tel qu'il apparaît dans les rapports EDL\",\n  \"ref_appartement\": \"Numéro d'appartement UNIQUEMENT (ex: 5273) sans le n° de location\",\n  \"num_location_extrait\": \"Numéro de location/dossier extrait des rapports (ex: 151284)\",\n  \"type_rapport_in\": \"Entrée ou Sortie selon le premier PDF fourni\",\n  \"type_rapport_out\": \"Entrée ou Sortie selon le second PDF fourni\",\n  \"pret_relocation\": true,\n  \"menage_necessaire\": true,\n  \"menage_imputable\": \"locataire\",\n  \"menage_formule_recommandee\": \"professionnelle\",\n  \"urgence\": false,\n  \"delai_ddg_mois\": 1,\n  \"deductions_locataire\": [{\"description\": \"...\", \"estimation_euros\": \"XX-XX €\"}],\n  \"charge_proprietaire\": [{\"description\": \"...\", \"raison\": \"...\"}],\n  \"reparations\": [{\"description\": \"...\", \"urgence\": true, \"estimation_euros\": \"XX-XX €\", \"imputable\": \"locataire\"}],\n  \"points_bloquants\": [],\n  \"observations\": [],\n  \"resume\": \"Résumé en 2-3 phrases\",\n  \"action\": \"menage_ddg\",\n  \"etat_entree_propre\": true,\n  \"total_deductions_min\": 0,\n  \"total_deductions_max\": 0,\n  \"alerte_photos_dupliquees\": false,\n  \"alerte_photos_detail\": \"\"\n}`;
-
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/.netlify/functions/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 4096,
-          system: systemPrompt,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "text", text: `EDL ENTRÉE (${pagesIn.length} pages) :` },
-              ...pagesIn.map(b64 => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } })),
-              { type: "text", text: `EDL SORTIE (${pagesOut.length} pages) :` },
-              ...pagesOut.map(b64 => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } })),
-              { type: "text", text: "Analyse et compare ces deux rapports pièce par pièce, en tenant compte du texte ET des photos. Réponds uniquement en JSON valide sans backticks." }
-            ]
-          }]
+          textIn: dataIn.text,
+          textOut: dataOut.text,
+          hasDuplicatePhotos,
+          duplicateDetail,
+          context: {
+            rentalId: loc.RentalID,
+            locataire: loc.ContactPayeur,
+            refAppart: loc.Référence,
+            proprietaire: appart.Proprietaire || "N/A",
+            gestionnaire: appart.Gestionnaire || "N/A",
+            checkOut: loc.CheckOut,
+            prochainCI: nextBooking ? `${nextBooking.CheckIn} (${daysToNext} jours)` : "Aucun à venir",
+            urgence: urgence ? `OUI - CI dans ${daysToNext} jours` : "NON",
+            montantDDG: ddg["Montant DG restant dans IGLOO"] ?? "Non trouvé",
+            statutDDG: ddg["DDG"] || "N/A"
+          }
         })
       });
 
@@ -282,50 +289,25 @@ PROCESS:\n1. Compare l\'EDL IN et l\'EDL OUT pièce par pièce (texte ET photos)
     if (!edlPrevOut || !edlIn || !info) return;
     setLoadingCompare(true);
     try {
-      const [pagesPrevOut, pagesIn] = await Promise.all([
+      const [dataPrevOut, dataInCompare] = await Promise.all([
         extractPdfPages(edlPrevOut),
         extractPdfPages(edlIn)
       ]);
       const { loc, appart } = info;
-      const systemPrompt = `Tu es un expert en gestion locative. Tu compares un EDL de Sortie de la location précédente avec l'EDL d'Entrée de la location actuelle pour identifier des dégradations survenues ENTRE les deux locations.
 
-CONTEXTE: Appartement ref ${loc.Référence} - Propriétaire: ${appart.Proprietaire || 'N/A'}
-IMPORTANT: Ces deux rapports ont des numéros de location DIFFÉRENTS (deux locations successives du même appartement). C'est normal et attendu.
-
-Compare pièce par pièce et identifie:
-1. Dégradations présentes à la sortie précédente ET à l'entrée actuelle → Responsabilité PROPRIÉTAIRE (non réparé entre locations)
-2. Éléments en bon état à la sortie précédente mais dégradés à l'entrée actuelle → Anomalie à signaler
-3. Amélioration entre les deux → Travaux effectués par le propriétaire
-
-RÉPONDS UNIQUEMENT EN JSON:
-{
-  "ref_appartement_prevOut": "Référence appartement extraite du 1er rapport (sortie précédente)",
-  "ref_appartement_in": "Référence appartement extraite du 2e rapport (entrée actuelle)",
-  "responsabilite_proprietaire": [{"description": "...", "raison": "présent sur EDL sortie précédente"}],
-  "anomalies": [{"description": "...", "detail": "..."}],
-  "travaux_effectues": [{"description": "..."}],
-  "resume": "Résumé 2-3 phrases",
-  "recommandation": "..."
-}`;
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/.netlify/functions/analyze-compare", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 4096,
-          system: systemPrompt,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "text", text: `EDL SORTIE LOCATION PRÉCÉDENTE (${pagesPrevOut.length} pages) :` },
-              ...pagesPrevOut.map(b64 => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } })),
-              { type: "text", text: `EDL ENTRÉE LOCATION ACTUELLE (${pagesIn.length} pages) :` },
-              ...pagesIn.map(b64 => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } })),
-              { type: "text", text: "Compare ces deux rapports et réponds uniquement en JSON valide sans backticks." }
-            ]
-          }]
+          textPrevOut: dataPrevOut.text,
+          textIn: dataInCompare.text,
+          context: {
+            refAppart: loc.Référence,
+            proprietaire: appart.Proprietaire || "N/A"
+          }
         })
       });
+
       const data = await response.json();
       if (data.error) throw new Error("API: " + data.error.message);
       const text = data.content?.find(c => c.type === "text")?.text || "";
@@ -619,21 +601,6 @@ RÉPONDS UNIQUEMENT EN JSON:
                     <div style={{ fontSize: "14px", color: "#444", background: "#F5F0E8", padding: "14px 16px", borderRadius: "8px", lineHeight: "1.6", marginBottom: "20px" }}>
                       {result.resume}
                     </div>
-
-                    {result.alerte_photos_dupliquees && (
-                      <div style={{ background: "#FFF3CD", border: "2px solid #FFC107", borderRadius: "8px", padding: "14px 16px", marginBottom: "16px", display: "flex", gap: "10px", alignItems: "flex-start" }}>
-                        <span style={{ fontSize: "20px", flexShrink: 0 }}>⚠️</span>
-                        <div>
-                          <div style={{ fontWeight: "700", color: "#856404", fontSize: "13px", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "4px" }}>Photos potentiellement dupliquées — Vérification nécessaire</div>
-                          <div style={{ fontSize: "13px", color: "#856404", lineHeight: "1.5" }}>
-                            Des photos semblent identiques entre l&apos;EDL IN et l&apos;EDL OUT. Le welcomer a peut-être réutilisé les mêmes photos. Merci de vérifier les rapports originaux.
-                          </div>
-                          {result.alerte_photos_detail && (
-                            <div style={{ marginTop: "6px", fontSize: "12px", color: "#856404", fontStyle: "italic" }}>{result.alerte_photos_detail}</div>
-                          )}
-                        </div>
-                      </div>
-                    )}
 
                     {result.deductions_locataire?.length > 0 && (
                       <div className="result-section">
